@@ -1,0 +1,267 @@
+<!-- templates/watermark-remover/select.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select Watermark Area</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .canvas-container {
+            position: relative;
+            margin: 0 auto;
+            max-width: 100%;
+            overflow: auto;
+        }
+        #preview-canvas {
+            border: 1px solid #ddd;
+            cursor: crosshair;
+            max-width: 100%;
+        }
+        .coordinates {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 5px;
+        }
+        .instructions {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <h1 class="text-center mb-4">Select Watermark Area</h1>
+        
+        <div class="instructions">
+            <div class="alert alert-info">
+                <p><strong>Instructions:</strong></p>
+                <ol>
+                    <li>Click and drag to draw a rectangle around the watermark you want to remove</li>
+                    <li>You can readjust by drawing a new rectangle</li>
+                    <li>Choose a removal method below</li>
+                    <li>Click "Process Video" when ready</li>
+                </ol>
+            </div>
+        </div>
+        
+        <div class="canvas-container">
+            <canvas id="preview-canvas"></canvas>
+        </div>
+        
+        <div class="coordinates" id="coordinates">
+            <div class="row">
+                <div class="col-md-3">
+                    <label for="x">X:</label>
+                    <input type="number" id="x" class="form-control" value="0" min="0" max="{{ width }}">
+                </div>
+                <div class="col-md-3">
+                    <label for="y">Y:</label>
+                    <input type="number" id="y" class="form-control" value="0" min="0" max="{{ height }}">
+                </div>
+                <div class="col-md-3">
+                    <label for="rect-width">Width:</label>
+                    <input type="number" id="rect-width" class="form-control" value="0" min="1" max="{{ width }}">
+                </div>
+                <div class="col-md-3">
+                    <label for="rect-height">Height:</label>
+                    <input type="number" id="rect-height" class="form-control" value="0" min="1" max="{{ height }}">
+                </div>
+            </div>
+        </div>
+        
+        <form action="{{ url_for('process_video', job_id=job_id) }}" method="post" class="mt-4">
+            <input type="hidden" name="x" id="x-hidden">
+            <input type="hidden" name="y" id="y-hidden">
+            <input type="hidden" name="width" id="width-hidden">
+            <input type="hidden" name="height" id="height-hidden">
+            
+            <div class="form-group mb-3">
+                <label for="method">Removal Method:</label>
+                <select class="form-control" id="method" name="method">
+                    <option value="inpaint">Inpainting (Better for complex backgrounds)</option>
+                    <option value="blur">Blur (Faster, sometimes less noticeable)</option>
+                </select>
+            </div>
+            
+            <div class="d-grid gap-2">
+                <button type="submit" class="btn btn-primary" id="process-btn" disabled>Process Video</button>
+                <a href="{{ url_for('index') }}" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const canvas = document.getElementById('preview-canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            // Form elements
+            const xInput = document.getElementById('x');
+            const yInput = document.getElementById('y');
+            const widthInput = document.getElementById('rect-width');
+            const heightInput = document.getElementById('rect-height');
+            const xHidden = document.getElementById('x-hidden');
+            const yHidden = document.getElementById('y-hidden');
+            const widthHidden = document.getElementById('width-hidden');
+            const heightHidden = document.getElementById('height-hidden');
+            const processBtn = document.getElementById('process-btn');
+            
+            // Selection variables
+            let isDrawing = false;
+            let startX = 0;
+            let startY = 0;
+            let selectedRect = {x: 0, y: 0, width: 0, height: 0};
+            
+            // Set canvas dimensions based on image size
+            img.onload = function() {
+                canvas.width = img.width;
+                canvas.height = img.height;
+                drawImage();
+            };
+            
+            // Load the preview image
+            img.src = "{{ url_for('uploaded_file', filename=preview) }}";
+            
+            function drawImage() {
+                ctx.drawImage(img, 0, 0);
+                drawSelection();
+            }
+            
+            function drawSelection() {
+                if (selectedRect.width > 0 && selectedRect.height > 0) {
+                    ctx.strokeStyle = 'red';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(selectedRect.x, selectedRect.y, selectedRect.width, selectedRect.height);
+                    
+                    // Semi-transparent overlay
+                    ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+                    ctx.fillRect(selectedRect.x, selectedRect.y, selectedRect.width, selectedRect.height);
+                    
+                    // Update coordinate inputs
+                    xInput.value = selectedRect.x;
+                    yInput.value = selectedRect.y;
+                    widthInput.value = selectedRect.width;
+                    heightInput.value = selectedRect.height;
+                    
+                    // Update hidden inputs
+                    xHidden.value = selectedRect.x;
+                    yHidden.value = selectedRect.y;
+                    widthHidden.value = selectedRect.width;
+                    heightHidden.value = selectedRect.height;
+                    
+                    // Enable process button
+                    processBtn.disabled = false;
+                }
+            }
+            
+            // Canvas event listeners
+            canvas.addEventListener('mousedown', function(e) {
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                
+                startX = (e.clientX - rect.left) * scaleX;
+                startY = (e.clientY - rect.top) * scaleY;
+                isDrawing = true;
+            });
+            
+            canvas.addEventListener('mousemove', function(e) {
+                if (!isDrawing) return;
+                
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+                
+                // Redraw the image
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0);
+                
+                // Draw the current selection rectangle
+                const width = x - startX;
+                const height = y - startY;
+                
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(startX, startY, width, height);
+                
+                // Semi-transparent overlay
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+                ctx.fillRect(startX, startY, width, height);
+            });
+            
+            canvas.addEventListener('mouseup', function(e) {
+                if (!isDrawing) return;
+                
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+                
+                let width = x - startX;
+                let height = y - startY;
+                
+                // Handle negative dimensions
+                let rectX = startX;
+                let rectY = startY;
+                
+                if (width < 0) {
+                    rectX = x;
+                    width = Math.abs(width);
+                }
+                
+                if (height < 0) {
+                    rectY = y;
+                    height = Math.abs(height);
+                }
+                
+                // Update the selected rectangle
+                selectedRect = {
+                    x: Math.round(rectX),
+                    y: Math.round(rectY),
+                    width: Math.round(width),
+                    height: Math.round(height)
+                };
+                
+                // Redraw
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                drawImage();
+                
+                isDrawing = false;
+            });
+            
+            // Update form inputs when the coordinates are changed manually
+            [xInput, yInput, widthInput, heightInput].forEach(input => {
+                input.addEventListener('change', function() {
+                    selectedRect = {
+                        x: parseInt(xInput.value) || 0,
+                        y: parseInt(yInput.value) || 0,
+                        width: parseInt(widthInput.value) || 0,
+                        height: parseInt(heightInput.value) || 0
+                    };
+                    
+                    // Update hidden inputs
+                    xHidden.value = selectedRect.x;
+                    yHidden.value = selectedRect.y;
+                    widthHidden.value = selectedRect.width;
+                    heightHidden.value = selectedRect.height;
+                    
+                    // Redraw
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    drawImage();
+                    
+                    // Enable process button if we have a valid selection
+                    processBtn.disabled = !(selectedRect.width > 0 && selectedRect.height > 0);
+                });
+            });
+        });
+    </script>
+</body>
+</html>
